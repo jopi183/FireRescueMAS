@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fire Rescue Multi-Agent Simulation</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔥 Fire Rescue Multi-Agent Simulation 🚒</h1>
+            <p>Advanced Emergency Response Simulation System</p>
+        </div>
+
+        <div class="controls">
+            <button id="startButton" class="btn btn-primary">🚀 Start Simulation</button>
+            <button id="pauseButton" class="btn btn-secondary">⏸️ Pause</button>
+            <button id="resetButton" class="btn btn-success">🔄 Reset</button>
+            <button id="stepButton" class="btn btn-secondary">⏭️ Step</button>
+        </div>
+
+        <div class="turn-info">
+            Turn: <span id="turnCounter">0</span> | Status: <span id="simStatus">Ready</span>
+        </div>
+
+        <!-- RL Configuration Panel -->
+        <div class="rl-config-panel">
+            <h2>🤖 Reinforcement Learning Configuration</h2>
+            <div>
+                <label for="rlAlgorithm">Algorithm:</label>
+                <select id="rlAlgorithm">
+                    <option value="qlearning" selected>Q-Learning</option>
+                    <option value="sarsa">SARSA</option>
+                </select>
+            </div>
+            <div>
+                <label for="numEpisodes">Training Episodes:</label>
+                <input type="number" id="numEpisodes" value="1000" min="1">
+            </div>
+            <div>
+                <label for="learningRate">Learning Rate (α):</label>
+                <input type="number" id="learningRate" value="0.1" min="0" max="1" step="0.01">
+            </div>
+            <div>
+                <label for="discountFactor">Discount Factor (γ):</label>
+                <input type="number" id="discountFactor" value="0.9" min="0" max="1" step="0.01">
+            </div>
+            <div>
+                <label for="epsilonStart">Epsilon (ε) Start:</label>
+                <input type="number" id="epsilonStart" value="1.0" min="0" max="1" step="0.01">
+            </div>
+            <div>
+                <label for="epsilonDecay">Epsilon Decay Rate:</label>
+                <input type="number" id="epsilonDecay" value="0.995" min="0" max="1" step="0.001">
+            </div>
+             <div>
+                <label for="epsilonMin">Epsilon Min:</label>
+                <input type="number" id="epsilonMin" value="0.01" min="0" max="1" step="0.01">
+            </div>
+            <div>
+                <label for="maxStepsPerEpisode">Max Steps/Episode:</label>
+                <input type="number" id="maxStepsPerEpisode" value="200" min="10">
+            </div>
+            <div class="controls">
+                <button id="startTrainingButton" class="btn btn-primary">🧠 Start Training</button>
+                <button id="stopTrainingButton" class="btn btn-secondary" disabled>🛑 Stop Training</button>
+                <button id="saveQTableButton" class="btn btn-success">💾 Save Q-Table</button>
+                <button id="loadQTableButton" class="btn btn-success">📂 Load Q-Table</button>
+            </div>
+            <div>
+                <label for="useLearnedPolicy">Use Learned Policy in Simulation:</label>
+                <input type="checkbox" id="useLearnedPolicy">
+            </div>
+            <div id="trainingStatus" style="text-align: center; margin-top: 5px;">Status: Idle</div>
+            <div id="episodeInfo" style="text-align: center; margin-top: 5px;">Episode: 0/0, Avg Reward: N/A, ε: N/A</div>
+        </div>
+        <!-- End RL Configuration Panel -->
+
+        <div class="main-content">
+            <div class="simulation-area">
+                <div class="grid-container">
+                    <div class="grid" id="simulationGrid"></div>
+                </div>
+                
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #f0f0f0;"></div>
+                        <span>Floor</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #666;"></div>
+                        <span>Wall</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #ff4757;"></div>
+                        <span>Fire</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: rgba(128,128,128,0.6);"></div>
+                        <span>Light Smoke</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: rgba(64,64,64,0.8);"></div>
+                        <span>Heavy Smoke</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #90EE90;"></div>
+                        <span>Entrance</span>
+                    </div>
+                     <div class="legend-item">
+                        <div class="legend-color agent firefighter" style="position: static; border: 1px solid #fff;"></div>
+                        <span>Firefighter</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color agent rescuer" style="position: static; border: 1px solid #fff;"></div>
+                        <span>Rescuer</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color agent victim" style="position: static; border: 1px solid #fff;"></div>
+                        <span>Victim</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stats-panel">
+                <div class="stats-section">
+                    <h3>🎯 Mission Status</h3>
+                    <div class="stat-item">
+                        <span>Victims Rescued:</span>
+                        <span id="victimsRescued">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>Victims Remaining:</span>
+                        <span id="victimsRemaining">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>Fires Active:</span>
+                        <span id="firesActive">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>Total Score:</span>
+                        <span id="totalScore">0</span>
+                    </div>
+                </div>
+
+                <div class="stats-section">
+                    <h3>👨‍🚒 Agent Status</h3>
+                    <div id="agentStats"></div>
+                </div>
+
+                <div class="stats-section">
+                    <h3>📋 Activity Log</h3>
+                    <div class="log-panel" id="activityLog"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
