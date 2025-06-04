@@ -1,0 +1,1320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fire Rescue Multi-Agent Simulation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh;
+            color: white;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            margin-bottom: 10px;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: linear-gradient(45deg, #4834d4, #686de0);
+            color: white;
+        }
+
+        .btn-success {
+            background: linear-gradient(45deg, #00d2d3, #54a0ff);
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 350px;
+            gap: 20px;
+        }
+
+        .simulation-area {
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .grid-container {
+            display: inline-block;
+            border: 3px solid #333;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(20, 25px);
+            grid-template-rows: repeat(15, 25px);
+            gap: 1px;
+            background: #222;
+        }
+
+        .tile {
+            width: 25px;
+            height: 25px;
+            position: relative;
+            border: 0.5px solid rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .tile.floor { background: #f0f0f0; }
+        .tile.wall { background: #666; }
+        .tile.door { background: #8B4513; }
+        .tile.window { background: #87CEEB; }
+        .tile.entrance { background: #90EE90; }
+        .tile.toilet { background: #DDA0DD; }
+        .tile.chemcab { background: #FFB6C1; }
+        
+        .tile.fire {
+            background: radial-gradient(circle, #ff4757, #ff3838);
+            animation: fireFlicker 0.5s infinite alternate;
+        }
+
+        .tile.smoke-light {
+            background: rgba(128, 128, 128, 0.6);
+        }
+
+        .tile.smoke-heavy {
+            background: rgba(64, 64, 64, 0.8);
+        }
+
+        .tile.toxic-fumes {
+            background: rgba(128, 0, 128, 0.7);
+        }
+
+        .tile.debris {
+            background: #8B4513;
+        }
+
+        .agent {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 8px;
+            font-weight: bold;
+            z-index: 10;
+            animation: agentPulse 1s infinite;
+        }
+
+        .agent.firefighter {
+            background: radial-gradient(circle, #ff6b6b, #ee5a24);
+            color: white;
+            border: 2px solid #ff3838;
+        }
+
+        .agent.rescuer {
+            background: radial-gradient(circle, #4834d4, #3742fa);
+            color: white;
+            border: 2px solid #2f3542;
+        }
+
+        .agent.victim {
+            background: radial-gradient(circle, #feca57, #ff9ff3);
+            color: #333;
+            border: 2px solid #ff6348;
+        }
+
+        @keyframes fireFlicker {
+            0% { opacity: 0.8; }
+            100% { opacity: 1; }
+        }
+
+        @keyframes agentPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .stats-panel {
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+            height: fit-content;
+        }
+
+        .stats-section {
+            margin-bottom: 25px;
+        }
+
+        .stats-section h3 {
+            color: #ff6b6b;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .agent-stats {
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+
+        .health-bar, .stamina-bar, .water-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 4px;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+
+        .health-bar .fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff6b6b, #ee5a24);
+            transition: width 0.3s ease;
+        }
+
+        .stamina-bar .fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4834d4, #686de0);
+            transition: width 0.3s ease;
+        }
+
+        .water-bar .fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d2d3, #54a0ff);
+            transition: width 0.3s ease;
+        }
+
+        .log-panel {
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            padding: 15px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+
+        .log-info { background: rgba(54, 162, 235, 0.2); }
+        .log-warning { background: rgba(255, 206, 84, 0.2); }
+        .log-danger { background: rgba(255, 99, 132, 0.2); }
+        .log-success { background: rgba(75, 192, 192, 0.2); }
+
+        .turn-info {
+            text-align: center;
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #feca57;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .legend {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 3px;
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+
+        @media (max-width: 1200px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .grid {
+                grid-template-columns: repeat(20, 20px);
+                grid-template-rows: repeat(15, 20px);
+            }
+            
+            .tile {
+                width: 20px;
+                height: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔥 Fire Rescue Multi-Agent Simulation 🚒</h1>
+            <p>Advanced Emergency Response Simulation System</p>
+        </div>
+
+        <div class="controls">
+            <button class="btn btn-primary" onclick="startSimulation()">🚀 Start Simulation</button>
+            <button class="btn btn-secondary" onclick="pauseSimulation()">⏸️ Pause</button>
+            <button class="btn btn-success" onclick="resetSimulation()">🔄 Reset</button>
+            <button class="btn btn-secondary" onclick="stepSimulation()">⏭️ Step</button>
+        </div>
+
+        <div class="turn-info">
+            Turn: <span id="turnCounter">0</span> | Status: <span id="simStatus">Ready</span>
+        </div>
+
+        <div class="main-content">
+            <div class="simulation-area">
+                <div class="grid-container">
+                    <div class="grid" id="simulationGrid"></div>
+                </div>
+                
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #f0f0f0;"></div>
+                        <span>Floor</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #666;"></div>
+                        <span>Wall</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #ff4757;"></div>
+                        <span>Fire</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: rgba(128,128,128,0.6);"></div>
+                        <span>Light Smoke</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: rgba(64,64,64,0.8);"></div>
+                        <span>Heavy Smoke</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #90EE90;"></div>
+                        <span>Entrance</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stats-panel">
+                <div class="stats-section">
+                    <h3>🎯 Mission Status</h3>
+                    <div class="stat-item">
+                        <span>Victims Rescued:</span>
+                        <span id="victimsRescued">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>Victims Remaining:</span>
+                        <span id="victimsRemaining">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>Fires Active:</span>
+                        <span id="firesActive">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>Total Score:</span>
+                        <span id="totalScore">0</span>
+                    </div>
+                </div>
+
+                <div class="stats-section">
+                    <h3>👨‍🚒 Agent Status</h3>
+                    <div id="agentStats"></div>
+                </div>
+
+                <div class="stats-section">
+                    <h3>📋 Activity Log</h3>
+                    <div class="log-panel" id="activityLog"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global simulation state
+        let simulation = null;
+        let isRunning = false;
+        let currentTurn = 0;
+        let animationId = null;
+
+        // Simulation classes
+        class Tile {
+            constructor(type = 'floor') {
+                this.type = type;
+                this.passability = this.getPassability(type);
+                this.breakHP = this.getBreakHP(type);
+                this.movable = false;
+                this.visibility = 1.0;
+                this.flammability = this.getFlammability(type);
+                this.fireFuel = 0;
+                this.smokeLevel = 'None';
+                this.isToxicFumes = false;
+                this.dampness = 0;
+                this.structuralIntegrity = 100;
+                this.hasDebris = false;
+                this.isHole = false;
+                this.heatExhausted = false;
+                this.ventilated = false;
+            }
+
+            getPassability(type) {
+                const passabilityMap = {
+                    'floor': 1.0, 'corridor': 1.0, 'entrance': 1.0, 'toilet': 1.0,
+                    'furniture': 1.2, 'debris': 1.8, 'wall': Infinity, 'door': 1.0,
+                    'window': 1.0, 'chemcab': 1.0
+                };
+                return passabilityMap[type] || 1.0;
+            }
+
+            getBreakHP(type) {
+                const breakHPMap = {
+                    'window': 10, 'door': 20, 'chemcab': 25, 'wall': 80
+                };
+                return breakHPMap[type] || 0;
+            }
+
+            getFlammability(type) {
+                const flammabilityMap = {
+                    'floor': 1, 'furniture': 3, 'door': 2, 'wall': 0, 'chemcab': 4
+                };
+                return flammabilityMap[type] || 1;
+            }
+
+            get isOnFire() {
+                return this.fireFuel > 0;
+            }
+
+            ignite() {
+                if (this.flammability > 0 && !this.isOnFire) {
+                    this.fireFuel = 30;
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        class Agent {
+            constructor(type, row, col) {
+                this.type = type;
+                this.row = row;
+                this.col = col;
+                this.initStats(type);
+                this.panic = 0;
+                this.inventory = null;
+                this.unconscious = false;
+                this.dead = false;
+                this.leadingVictim = null;
+                this.rescued = false;
+            }
+
+            initStats(type) {
+                const stats = {
+                    'firefighter': { hp: 120, maxHP: 120, sp: 120, maxSP: 120, speed: 1.5, water: 100, maxWater: 100, scba: 60, panicK: 60 },
+                    'rescuer': { hp: 110, maxHP: 110, sp: 120, maxSP: 120, speed: 2.0, water: 40, maxWater: 40, scba: 60, panicK: 60 },
+                    'victim': { hp: 100, maxHP: 100, sp: 80, maxSP: 80, speed: 1.0, water: 0, maxWater: 0, scba: 0, panicK: 40 }
+                };
+                
+                const stat = stats[type];
+                this.hp = stat.hp;
+                this.maxHP = stat.maxHP;
+                this.sp = stat.sp;
+                this.maxSP = stat.maxSP;
+                this.baseSpeed = stat.speed;
+                this.water = stat.water;
+                this.maxWater = stat.maxWater;
+                this.scba = stat.scba;
+                this.panicK = stat.panicK;
+            }
+
+            getEffectiveSpeed() {
+                if (this.unconscious || this.dead) return 0;
+                
+                let healthMult = this.hp >= 50 ? 1.0 : (this.hp >= 25 ? 0.8 : 0.6);
+                let staminaMult = this.sp >= 30 ? 1.0 : 0.8;
+                let waterMult = (this.water <= this.maxWater * 0.7) ? 1.0 : 0.8;
+                let itemMult = this.inventory ? 0.9 : 1.0;
+                
+                return Math.max(0.5, this.baseSpeed * healthMult * staminaMult * waterMult * itemMult);
+            }
+
+            takeDamage(amount) {
+                this.hp = Math.max(0, this.hp - amount);
+                if (this.hp === 0) {
+                    this.dead = true;
+                    this.unconscious = true;
+                }
+            }
+
+            recoverStamina(amount = 3) {
+                if (!this.heatExhausted) {
+                    this.sp = Math.min(this.maxSP, this.sp + amount);
+                    if (this.sp >= 1 && this.unconscious && !this.dead) {
+                        this.unconscious = false;
+                    }
+                }
+            }
+
+            getPanicProbability() {
+                return 1 / (1 + Math.exp(-0.15 * (this.panic - this.panicK)));
+            }
+
+            updatePanic(environment) {
+                // Panic increases based on hazards
+                if (environment.hasAdjacentFire(this.row, this.col)) {
+                    this.panic = Math.min(100, this.panic + 3);
+                }
+                if (environment.getTile(this.row, this.col).smokeLevel === 'Heavy') {
+                    this.panic = Math.min(100, this.panic + 5);
+                }
+                if (this.hp < 25) {
+                    this.panic = Math.min(100, this.panic + 7);
+                }
+                
+                // Victim being led by rescuer reduces panic
+                if (this.type === 'victim' && this.leadingVictim) {
+                    this.panic = Math.max(25, this.panic - 5);
+                }
+            }
+        }
+
+        class Environment {
+            constructor(width = 20, height = 15) {
+                this.width = width;
+                this.height = height;
+                this.grid = [];
+                this.agents = [];
+                this.initializeGrid();
+                this.spawnAgents();
+                this.startFires();
+            }
+
+            initializeGrid() {
+                for (let row = 0; row < this.height; row++) {
+                    this.grid[row] = [];
+                    for (let col = 0; col < this.width; col++) {
+                        // Create a more complex building layout
+                        let tileType = 'floor';
+                        
+                        // Walls around perimeter
+                        if (row === 0 || row === this.height - 1 || col === 0 || col === this.width - 1) {
+                            tileType = 'wall';
+                        }
+                        
+                        // Create rooms and corridors
+                        if (row === 7 && col > 2 && col < this.width - 3) {
+                            tileType = 'wall'; // horizontal corridor wall
+                        }
+                        if (col === 10 && row > 2 && row < this.height - 3 && row !== 7) {
+                            tileType = 'wall'; // vertical wall
+                        }
+                        
+                        // Doors
+                        if ((row === 7 && (col === 5 || col === 15)) || (col === 10 && (row === 4 || row === 10))) {
+                            tileType = 'door';
+                        }
+                        
+                        // Entrance
+                        if (row === this.height - 1 && col === 1) {
+                            tileType = 'entrance';
+                        }
+                        
+                        // Windows
+                        if (row === 0 && (col === 5 || col === 15)) {
+                            tileType = 'window';
+                        }
+                        
+                        // Special rooms
+                        if (row === 2 && col === 2) {
+                            tileType = 'toilet';
+                        }
+                        if (row === 2 && col === 17) {
+                            tileType = 'chemcab';
+                        }
+                        
+                        // Some furniture
+                        if ((row === 3 && col === 6) || (row === 9 && col === 14)) {
+                            tileType = 'furniture';
+                        }
+                        
+                        this.grid[row][col] = new Tile(tileType);
+                    }
+                }
+            }
+
+            spawnAgents() {
+                // Spawn firefighters at entrance
+                this.agents.push(new Agent('firefighter', this.height - 2, 1));
+                this.agents.push(new Agent('firefighter', this.height - 2, 2));
+                
+                // Spawn rescuers at entrance
+                this.agents.push(new Agent('rescuer', this.height - 3, 1));
+                this.agents.push(new Agent('rescuer', this.height - 3, 2));
+                
+                // Spawn victims in various rooms
+                this.agents.push(new Agent('victim', 3, 8));
+                this.agents.push(new Agent('victim', 5, 15));
+                this.agents.push(new Agent('victim', 9, 6));
+                this.agents.push(new Agent('victim', 11, 16));
+            }
+
+            startFires() {
+                // Start some initial fires
+                this.getTile(4, 7).ignite();
+                this.getTile(10, 14).ignite();
+                this.getTile(6, 16).ignite();
+            }
+
+            getTile(row, col) {
+                if (row >= 0 && row < this.height && col >= 0 && col < this.width) {
+                    return this.grid[row][col];
+                }
+                return null;
+            }
+
+            hasAdjacentFire(row, col) {
+                const directions = [[-1,0], [1,0], [0,-1], [0,1]];
+                for (let [dr, dc] of directions) {
+                    const tile = this.getTile(row + dr, col + dc);
+                    if (tile && tile.isOnFire) return true;
+                }
+                return false;
+            }
+
+            updateFire() {
+                const newFires = [];
+                
+                // Process each burning tile
+                for (let row = 0; row < this.height; row++) {
+                    for (let col = 0; col < this.width; col++) {
+                        const tile = this.grid[row][col];
+                        
+                        if (tile.isOnFire) {
+                            // Decrease fire fuel
+                            tile.fireFuel = Math.max(0, tile.fireFuel - 1);
+                            
+                            // Set heavy smoke
+                            tile.smokeLevel = 'Heavy';
+                            
+                            // Try to spread fire
+                            const directions = [[-1,0], [1,0], [0,-1], [0,1]];
+                            for (let [dr, dc] of directions) {
+                                const targetTile = this.getTile(row + dr, col + dc);
+                                if (targetTile && !targetTile.isOnFire && targetTile.flammability > 0) {
+                                    const igniteChance = 0.1 * targetTile.flammability * (1 - targetTile.dampness / 10);
+                                    if (Math.random() < igniteChance) {
+                                        newFires.push([row + dr, col + dc]);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Decay dampness
+                        tile.dampness = Math.max(0, tile.dampness - 1);
+                    }
+                }
+                
+                // Ignite new fires
+                for (let [row, col] of newFires) {
+                    this.getTile(row, col).ignite();
+                }
+            }
+
+            updateSmoke() {
+                const newSmoke = {};
+                
+                for (let row = 0; row < this.height; row++) {
+                    for (let col = 0; col < this.width; col++) {
+                        const tile = this.grid[row][col];
+                        
+                        if (tile.smokeLevel !== 'None') {
+                            const spreadChance = tile.smokeLevel === 'Heavy' ? 1.0 : 0.5;
+                            
+                            if (Math.random() < spreadChance) {
+                                const directions = [[-1,0], [1,0], [0,-1], [0,1]];
+                                for (let [dr, dc] of directions) {
+                                    const targetRow = row + dr;
+                                    const targetCol = col + dc;
+                                    const targetTile = this.getTile(targetRow, targetCol);
+                                    
+                                    if (targetTile && targetTile.passability < Infinity) {
+                                        const key = `${targetRow},${targetCol}`;
+                                        if (!newSmoke[key] || newSmoke[key] === 'Light') {
+                                            newSmoke[key] = tile.smokeLevel === 'Heavy' ? 'Light' : 'Light';
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Apply new smoke
+                for (let key in newSmoke) {
+                    const [row, col] = key.split(',').map(Number);
+                    const tile = this.getTile(row, col);
+                    if (tile && tile.smokeLevel === 'None') {
+                        tile.smokeLevel = newSmoke[key];
+                    }
+                }
+            }
+
+            applyHazardDamage() {
+                for (let agent of this.agents) {
+                    if (agent.dead || agent.unconscious) continue;
+                    
+                    const tile = this.getTile(agent.row, agent.col);
+                    let damage = 0;
+                    
+                    // Fire damage
+                    if (tile.isOnFire) {
+                        damage = Math.max(damage, 10);
+                    } else if (this.hasAdjacentFire(agent.row, agent.col)) {
+                        damage = Math.max(damage, 4);
+                    }
+                    
+                    // Smoke damage (if no SCBA or SCBA empty)
+                    if (agent.scba <= 0 || agent.type === 'victim') {
+                        if (tile.smokeLevel === 'Heavy') {
+                            damage = Math.max(damage, 3);
+                        } else if (tile.smokeLevel === 'Light') {
+                            damage = Math.max(damage, 1);
+                        }
+                    }
+                    
+                    // Toxic fumes
+                    if (tile.isToxicFumes && (agent.scba <= 0 || agent.type === 'victim')) {
+                        damage = Math.max(damage, 5);
+                    }
+                    
+                    if (damage > 0) {
+                        agent.takeDamage(damage);
+                        this.logEvent(`${agent.type} at (${agent.row}, ${agent.col}) took ${damage} damage`, 'warning');
+                    }
+                    
+                    // Update SCBA
+                    if (agent.scba > 0 && agent.type !== 'victim') {
+                        agent.scba--;
+                    }
+                    
+                    // Update panic
+                    agent.updatePanic(this);
+                }
+            }
+
+            performAgentActions() {
+                for (let agent of this.agents) {
+                    if (agent.dead || agent.unconscious) {
+                        agent.recoverStamina(0);
+                        continue;
+                    }
+                    
+                    // Simple AI behavior
+                    this.performAI(agent);
+                    
+                    // Recover stamina if no action taken
+                    agent.recoverStamina(3);
+                }
+            }
+
+            performAI(agent) {
+                // Check panic - might cause random/freeze behavior
+                const panicProb = agent.getPanicProbability();
+                if (Math.random() < panicProb) {
+                    if (Math.random() < Math.max(0, panicProb - 0.15)) {
+                        // Freeze - do nothing
+                        return;
+                    } else {
+                        // Random movement
+                        this.moveAgentRandomly(agent);
+                        return;
+                    }
+                }
+                
+                if (agent.type === 'firefighter') {
+                    this.firefighterAI(agent);
+                } else if (agent.type === 'rescuer') {
+                    this.rescuerAI(agent);
+                } else if (agent.type === 'victim') {
+                    this.victimAI(agent);
+                }
+            }
+
+            firefighterAI(agent) {
+                // Priority: Fight fires, refill water if low
+                if (agent.water <= 20) {
+                    // Find nearest toilet to refill
+                    const toilet = this.findNearestTile(agent, 'toilet');
+                    if (toilet) {
+                        if (this.isAdjacent(agent.row, agent.col, toilet.row, toilet.col)) {
+                            agent.water = Math.min(agent.maxWater, agent.water + 20);
+                            this.logEvent(`Firefighter refilled water at (${toilet.row}, ${toilet.col})`, 'info');
+                        } else {
+                            this.moveAgentToward(agent, toilet.row, toilet.col);
+                        }
+                        return;
+                    }
+                }
+
+                // Find nearest fire to extinguish
+                const fire = this.findNearestFire(agent);
+                if (fire) {
+                    if (this.isAdjacent(agent.row, agent.col, fire.row, fire.col)) {
+                        // Use hose to extinguish fire
+                        if (agent.water >= 5) {
+                            agent.water -= 5;
+                            const fireTile = this.getTile(fire.row, fire.col);
+                            fireTile.fireFuel = Math.max(0, fireTile.fireFuel - 5);
+                            fireTile.dampness = 10;
+                            this.logEvent(`Firefighter extinguished fire at (${fire.row}, ${fire.col})`, 'success');
+                        }
+                    } else {
+                        this.moveAgentToward(agent, fire.row, fire.col);
+                    }
+                } else {
+                    // No fires, move toward entrance or patrol
+                    this.moveAgentToward(agent, this.height - 1, 1);
+                }
+            }
+
+            rescuerAI(agent) {
+                // Priority: Find and rescue victims
+                if (agent.leadingVictim) {
+                    // Leading a victim - move toward entrance
+                    const entrance = { row: this.height - 1, col: 1 };
+                    if (agent.row === entrance.row && agent.col === entrance.col) {
+                        // Victim rescued!
+                        agent.leadingVictim.rescued = true;
+                        agent.leadingVictim = null;
+                        this.logEvent(`Victim rescued by rescuer!`, 'success');
+                    } else {
+                        this.moveAgentToward(agent, entrance.row, entrance.col);
+                        // Move victim behind rescuer
+                        if (agent.leadingVictim) {
+                            const directions = [[-1,0], [1,0], [0,-1], [0,1]];
+                            for (let [dr, dc] of directions) {
+                                const newRow = agent.row + dr;
+                                const newCol = agent.col + dc;
+                                if (this.isValidPosition(newRow, newCol) && 
+                                    !this.getAgentAt(newRow, newCol)) {
+                                    agent.leadingVictim.row = newRow;
+                                    agent.leadingVictim.col = newCol;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Find nearest victim to rescue
+                    const victim = this.findNearestVictim(agent);
+                    if (victim) {
+                        if (this.isAdjacent(agent.row, agent.col, victim.row, victim.col)) {
+                            // Start leading victim
+                            agent.leadingVictim = victim;
+                            this.logEvent(`Rescuer started leading victim at (${victim.row}, ${victim.col})`, 'info');
+                        } else {
+                            this.moveAgentToward(agent, victim.row, victim.col);
+                        }
+                    } else {
+                        // No victims left, help with firefighting if possible
+                        if (agent.water > 0) {
+                            const fire = this.findNearestFire(agent);
+                            if (fire && this.isAdjacent(agent.row, agent.col, fire.row, fire.col)) {
+                                agent.water -= 5;
+                                const fireTile = this.getTile(fire.row, fire.col);
+                                fireTile.fireFuel = Math.max(0, fireTile.fireFuel - 5);
+                                fireTile.dampness = 10;
+                                this.logEvent(`Rescuer helped extinguish fire at (${fire.row}, ${fire.col})`, 'success');
+                            } else if (fire) {
+                                this.moveAgentToward(agent, fire.row, fire.col);
+                            }
+                        }
+                    }
+                }
+            }
+
+            victimAI(agent) {
+                // Victims try to move away from hazards or toward rescuers
+                if (agent.rescued) return;
+
+                const currentTile = this.getTile(agent.row, agent.col);
+                
+                // If in immediate danger, try to move to safety
+                if (currentTile.isOnFire || currentTile.smokeLevel === 'Heavy' || 
+                    this.hasAdjacentFire(agent.row, agent.col)) {
+                    this.moveAgentToSafety(agent);
+                } else {
+                    // Try to move toward nearest rescuer or entrance
+                    const rescuer = this.findNearestRescuer(agent);
+                    if (rescuer) {
+                        this.moveAgentToward(agent, rescuer.row, rescuer.col);
+                    } else {
+                        this.moveAgentToward(agent, this.height - 1, 1); // toward entrance
+                    }
+                }
+            }
+
+            moveAgentRandomly(agent) {
+                const directions = [[-1,0], [1,0], [0,-1], [0,1]];
+                const direction = directions[Math.floor(Math.random() * directions.length)];
+                const newRow = agent.row + direction[0];
+                const newCol = agent.col + direction[1];
+                
+                if (this.isValidPosition(newRow, newCol) && !this.getAgentAt(newRow, newCol)) {
+                    agent.row = newRow;
+                    agent.col = newCol;
+                    agent.sp = Math.max(0, agent.sp - 2);
+                }
+            }
+
+            moveAgentToward(agent, targetRow, targetCol) {
+                const directions = [[-1,0], [1,0], [0,-1], [0,1]];
+                let bestMove = null;
+                let bestDistance = Infinity;
+                
+                for (let [dr, dc] of directions) {
+                    const newRow = agent.row + dr;
+                    const newCol = agent.col + dc;
+                    
+                    if (this.isValidPosition(newRow, newCol) && !this.getAgentAt(newRow, newCol)) {
+                        const distance = Math.abs(newRow - targetRow) + Math.abs(newCol - targetCol);
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
+                            bestMove = [newRow, newCol];
+                        }
+                    }
+                }
+                
+                if (bestMove && agent.getEffectiveSpeed() >= 1) {
+                    agent.row = bestMove[0];
+                    agent.col = bestMove[1];
+                    agent.sp = Math.max(0, agent.sp - 2);
+                }
+            }
+
+            moveAgentToSafety(agent) {
+                const directions = [[-1,0], [1,0], [0,-1], [0,1]];
+                let bestMove = null;
+                let bestSafety = -1;
+                
+                for (let [dr, dc] of directions) {
+                    const newRow = agent.row + dr;
+                    const newCol = agent.col + dc;
+                    
+                    if (this.isValidPosition(newRow, newCol) && !this.getAgentAt(newRow, newCol)) {
+                        const tile = this.getTile(newRow, newCol);
+                        let safety = 0;
+                        
+                        if (!tile.isOnFire) safety += 3;
+                        if (tile.smokeLevel === 'None') safety += 2;
+                        if (tile.smokeLevel === 'Light') safety += 1;
+                        if (!this.hasAdjacentFire(newRow, newCol)) safety += 2;
+                        
+                        if (safety > bestSafety) {
+                            bestSafety = safety;
+                            bestMove = [newRow, newCol];
+                        }
+                    }
+                }
+                
+                if (bestMove) {
+                    agent.row = bestMove[0];
+                    agent.col = bestMove[1];
+                    agent.sp = Math.max(0, agent.sp - 2);
+                }
+            }
+
+            findNearestFire(agent) {
+                let nearest = null;
+                let minDistance = Infinity;
+                
+                for (let row = 0; row < this.height; row++) {
+                    for (let col = 0; col < this.width; col++) {
+                        if (this.grid[row][col].isOnFire) {
+                            const distance = Math.abs(row - agent.row) + Math.abs(col - agent.col);
+                            if (distance < minDistance) {
+                                minDistance = distance;
+                                nearest = { row, col };
+                            }
+                        }
+                    }
+                }
+                
+                return nearest;
+            }
+
+            findNearestVictim(agent) {
+                let nearest = null;
+                let minDistance = Infinity;
+                
+                for (let victim of this.agents) {
+                    if (victim.type === 'victim' && !victim.rescued && !victim.dead) {
+                        const distance = Math.abs(victim.row - agent.row) + Math.abs(victim.col - agent.col);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            nearest = victim;
+                        }
+                    }
+                }
+                
+                return nearest;
+            }
+
+            findNearestRescuer(agent) {
+                let nearest = null;
+                let minDistance = Infinity;
+                
+                for (let rescuer of this.agents) {
+                    if (rescuer.type === 'rescuer' && !rescuer.dead) {
+                        const distance = Math.abs(rescuer.row - agent.row) + Math.abs(rescuer.col - agent.col);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            nearest = rescuer;
+                        }
+                    }
+                }
+                
+                return nearest;
+            }
+
+            findNearestTile(agent, tileType) {
+                let nearest = null;
+                let minDistance = Infinity;
+                
+                for (let row = 0; row < this.height; row++) {
+                    for (let col = 0; col < this.width; col++) {
+                        if (this.grid[row][col].type === tileType) {
+                            const distance = Math.abs(row - agent.row) + Math.abs(col - agent.col);
+                            if (distance < minDistance) {
+                                minDistance = distance;
+                                nearest = { row, col };
+                            }
+                        }
+                    }
+                }
+                
+                return nearest;
+            }
+
+            isValidPosition(row, col) {
+                if (row < 0 || row >= this.height || col < 0 || col >= this.width) return false;
+                const tile = this.getTile(row, col);
+                return tile && tile.passability < Infinity;
+            }
+
+            isAdjacent(row1, col1, row2, col2) {
+                return Math.abs(row1 - row2) + Math.abs(col1 - col2) === 1;
+            }
+
+            getAgentAt(row, col) {
+                return this.agents.find(agent => agent.row === row && agent.col === col && !agent.dead);
+            }
+
+            logEvent(message, type = 'info') {
+                const log = document.getElementById('activityLog');
+                const entry = document.createElement('div');
+                entry.className = `log-entry log-${type}`;
+                entry.textContent = `[Turn ${currentTurn}] ${message}`;
+                log.appendChild(entry);
+                log.scrollTop = log.scrollHeight;
+                
+                // Keep only last 50 entries
+                while (log.children.length > 50) {
+                    log.removeChild(log.firstChild);
+                }
+            }
+
+            update() {
+                this.updateFire();
+                this.updateSmoke();
+                this.applyHazardDamage();
+                this.performAgentActions();
+            }
+
+            getStats() {
+                const stats = {
+                    victimsRescued: this.agents.filter(a => a.type === 'victim' && a.rescued).length,
+                    victimsRemaining: this.agents.filter(a => a.type === 'victim' && !a.rescued && !a.dead).length,
+                    victimsDead: this.agents.filter(a => a.type === 'victim' && a.dead).length,
+                    firesActive: 0,
+                    totalScore: 0
+                };
+                
+                // Count active fires
+                for (let row = 0; row < this.height; row++) {
+                    for (let col = 0; col < this.width; col++) {
+                        if (this.grid[row][col].isOnFire) {
+                            stats.firesActive++;
+                        }
+                    }
+                }
+                
+                // Calculate score
+                const totalVictims = this.agents.filter(a => a.type === 'victim').length;
+                stats.totalScore = Math.round(100 * (stats.victimsRescued / totalVictims) - 50 * stats.victimsDead);
+                
+                return stats;
+            }
+
+            isComplete() {
+                const victims = this.agents.filter(a => a.type === 'victim');
+                const allVictimsRescuedOrDead = victims.every(v => v.rescued || v.dead);
+                const allFiresOut = this.getStats().firesActive === 0;
+                
+                return allVictimsRescuedOrDead || allFiresOut || currentTurn >= 300;
+            }
+        }
+
+        // Simulation control functions
+        function initializeSimulation() {
+            simulation = new Environment();
+            currentTurn = 0;
+            updateDisplay();
+            updateStats();
+            document.getElementById('simStatus').textContent = 'Ready';
+        }
+
+        function startSimulation() {
+            if (!simulation) initializeSimulation();
+            
+            if (isRunning) return;
+            
+            isRunning = true;
+            document.getElementById('simStatus').textContent = 'Running';
+            
+            function gameLoop() {
+                if (!isRunning) return;
+                
+                stepSimulation();
+                
+                if (simulation.isComplete()) {
+                    pauseSimulation();
+                    document.getElementById('simStatus').textContent = 'Complete';
+                    simulation.logEvent('Simulation completed!', 'success');
+                } else {
+                    animationId = setTimeout(gameLoop, 500); // 500ms per turn
+                }
+            }
+            
+            gameLoop();
+        }
+
+        function pauseSimulation() {
+            isRunning = false;
+            if (animationId) {
+                clearTimeout(animationId);
+                animationId = null;
+            }
+            document.getElementById('simStatus').textContent = 'Paused';
+        }
+
+        function resetSimulation() {
+            pauseSimulation();
+            initializeSimulation();
+            document.getElementById('activityLog').innerHTML = '';
+        }
+
+        function stepSimulation() {
+            if (!simulation) initializeSimulation();
+            
+            currentTurn++;
+            simulation.update();
+            updateDisplay();
+            updateStats();
+            document.getElementById('turnCounter').textContent = currentTurn;
+        }
+
+        function updateDisplay() {
+            const grid = document.getElementById('simulationGrid');
+            grid.innerHTML = '';
+            
+            for (let row = 0; row < simulation.height; row++) {
+                for (let col = 0; col < simulation.width; col++) {
+                    const tile = simulation.getTile(row, col);
+                    const tileElement = document.createElement('div');
+                    tileElement.className = 'tile';
+                    
+                    // Set base tile appearance
+                    tileElement.classList.add(tile.type);
+                    
+                    // Add fire effect
+                    if (tile.isOnFire) {
+                        tileElement.classList.add('fire');
+                    }
+                    
+                    // Add smoke effects
+                    if (tile.smokeLevel === 'Light') {
+                        tileElement.classList.add('smoke-light');
+                    } else if (tile.smokeLevel === 'Heavy') {
+                        tileElement.classList.add('smoke-heavy');
+                    }
+                    
+                    // Add toxic fumes
+                    if (tile.isToxicFumes) {
+                        tileElement.classList.add('toxic-fumes');
+                    }
+                    
+                    // Add debris
+                    if (tile.hasDebris) {
+                        tileElement.classList.add('debris');
+                    }
+                    
+                    // Add agents
+                    const agent = simulation.getAgentAt(row, col);
+                    if (agent) {
+                        const agentElement = document.createElement('div');
+                        agentElement.className = `agent ${agent.type}`;
+                        
+                        // Show agent symbol
+                        if (agent.type === 'firefighter') {
+                            agentElement.textContent = '🚒';
+                        } else if (agent.type === 'rescuer') {
+                            agentElement.textContent = '👨‍🚒';
+                        } else if (agent.type === 'victim') {
+                            agentElement.textContent = agent.rescued ? '✅' : (agent.dead ? '💀' : '😰');
+                        }
+                        
+                        // Add status indicators
+                        if (agent.unconscious) {
+                            agentElement.style.opacity = '0.5';
+                        }
+                        if (agent.dead) {
+                            agentElement.style.filter = 'grayscale(100%)';
+                        }
+                        
+                        tileElement.appendChild(agentElement);
+                    }
+                    
+                    grid.appendChild(tileElement);
+                }
+            }
+        }
+
+        function updateStats() {
+            const stats = simulation.getStats();
+            
+            document.getElementById('victimsRescued').textContent = stats.victimsRescued;
+            document.getElementById('victimsRemaining').textContent = stats.victimsRemaining;
+            document.getElementById('firesActive').textContent = stats.firesActive;
+            document.getElementById('totalScore').textContent = stats.totalScore;
+            
+            // Update agent stats
+            const agentStatsContainer = document.getElementById('agentStats');
+            agentStatsContainer.innerHTML = '';
+            
+            for (let agent of simulation.agents) {
+                const agentDiv = document.createElement('div');
+                agentDiv.className = 'agent-stats';
+                
+                const typeIcon = agent.type === 'firefighter' ? '🚒' : 
+                               agent.type === 'rescuer' ? '👨‍🚒' : '😰';
+                
+                agentDiv.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span>${typeIcon} ${agent.type}</span>
+                        <span>${agent.dead ? '💀' : agent.unconscious ? '😵' : '✅'}</span>
+                    </div>
+                    <div style="font-size: 11px; margin-bottom: 3px;">Health: ${agent.hp}/${agent.maxHP}</div>
+                    <div class="health-bar">
+                        <div class="fill" style="width: ${(agent.hp / agent.maxHP) * 100}%"></div>
+                    </div>
+                    <div style="font-size: 11px; margin-bottom: 3px;">Stamina: ${agent.sp}/${agent.maxSP}</div>
+                    <div class="stamina-bar">
+                        <div class="fill" style="width: ${(agent.sp / agent.maxSP) * 100}%"></div>
+                    </div>
+                    ${agent.maxWater > 0 ? `
+                        <div style="font-size: 11px; margin-bottom: 3px;">Water: ${agent.water}/${agent.maxWater}</div>
+                        <div class="water-bar">
+                            <div class="fill" style="width: ${(agent.water / agent.maxWater) * 100}%"></div>
+                        </div>
+                    ` : ''}
+                    <div style="font-size: 10px; color: #feca57;">Panic: ${agent.panic}/100 | SCBA: ${agent.scba}</div>
+                `;
+                
+                agentStatsContainer.appendChild(agentDiv);
+            }
+        }
+
+        // Initialize simulation on page load
+        window.addEventListener('load', function() {
+            initializeSimulation();
+        });
+    </script>
+</body>
+</html>
