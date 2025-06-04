@@ -482,8 +482,20 @@
                 this.dead = false;
                 this.leadingVictim = null;
                 this.rescued = false;
-            }
 
+                this.isRLControlled = (type === 'firefighter' || type === 'rescuer');
+                if (this.isRLControlled) {
+                    this.qTable = {};
+                    this.learningRate = 0.1; 
+                    this.discountFactor = 0.9; 
+                    this.epsilon = 1.0; 
+                    this.epsilonDecay = 0.9999; 
+                    this.minEpsilon = 0.05; 
+                    this.lastAction = null;
+                    this.lastState = null;
+                }
+
+            } 
             initStats(type) {
                 const stats = {
                     'firefighter': { hp: 120, maxHP: 120, sp: 120, maxSP: 120, speed: 1.5, water: 100, maxWater: 100, scba: 60, panicK: 60 },
@@ -505,61 +517,259 @@
 
             getEffectiveSpeed() {
                 if (this.unconscious || this.dead) return 0;
-                
                 let healthMult = this.hp >= 50 ? 1.0 : (this.hp >= 25 ? 0.8 : 0.6);
                 let staminaMult = this.sp >= 30 ? 1.0 : 0.8;
-                let waterMult = (this.water <= this.maxWater * 0.7) ? 1.0 : 0.8;
+                let waterMult = (this.water <= this.maxWater * 0.7) ? 1.0 : 0.8; // Less penalty for carrying water
                 let itemMult = this.inventory ? 0.9 : 1.0;
-                
                 return Math.max(0.5, this.baseSpeed * healthMult * staminaMult * waterMult * itemMult);
-            }
-
+            } 
             takeDamage(amount) {
                 this.hp = Math.max(0, this.hp - amount);
-                if (this.hp === 0) {
+                if (this.hp === 0 && !this.dead) { // Ensure this only triggers once
                     this.dead = true;
                     this.unconscious = true;
-                }
-            }
-
-            recoverStamina(amount = 3) {
-                if (!this.heatExhausted) {
-                    this.sp = Math.min(this.maxSP, this.sp + amount);
-                    if (this.sp >= 1 && this.unconscious && !this.dead) {
-                        this.unconscious = false;
+                    // If leading a victim, the victim is now on their own
+                    if (this.leadingVictim) {
+                        this.leadingVictim.leadingVictim = null; // Victim is no longer being led
+                        this.leadingVictim = null;
                     }
                 }
             }
 
+
+            recoverStamina(amount = 3) {
+                if (!this.heatExhausted) { // Assuming heatExhausted is a property you might add
+                    this.sp = Math.min(this.maxSP, this.sp + amount);
+                    if (this.sp >= 1 && this.unconscious && !this.dead && this.hp > 0) { // Can only recover if not dead and has some HP
+                        this.unconscious = false;
+                    }
+                }
+            } 
+
             getPanicProbability() {
+
                 return 1 / (1 + Math.exp(-0.15 * (this.panic - this.panicK)));
+
             }
+
+
 
             updatePanic(environment) {
-                // Panic increases based on hazards
-                if (environment.hasAdjacentFire(this.row, this.col)) {
-                    this.panic = Math.min(100, this.panic + 3);
+                if (this.dead) { this.panic = 0; return; }
+                let panicIncrease = 0;
+                if (environment.hasAdjacentFire(this.row, this.col)) panicIncrease += 3;
+                const currentTile = environment.getTile(this.row, this.col);
+                if (currentTile.smokeLevel === 'Heavy') panicIncrease += 5;
+                else if (currentTile.smokeLevel === 'Light') panicIncrease += 2;
+                if (this.hp < this.maxHP * 0.25) panicIncrease += 7;
+                else if (this.hp < this.maxHP * 0.5) panicIncrease += 3;
+                this.panic = Math.min(100, this.panic + panicIncrease);
+  
+                if (this.type === 'victim' && this.leadingVictim) { // Victim being led by someone
+                    this.panic = Math.max(Math.min(25, this.panicK -10), this.panic - 10); // Significantly reduces panic
+                } else if (this.panic > 0) {
+                this.panic = Math.max(0, this.panic - 1); // Natural panic decay
+              }
+            }
+            getRLState(environment) {
+                if (!this.isRLControlled) return null;
+                let obs = {};
+                const tile = environment.getTile(this.row, this.col);
+                // 1. Nearest Fire Direction
+                const nearestFire = environment.findNearestFire(this);
+                if (nearestFire) {
+                    if (environment.isAdjacent(this.row, this.col, nearestFire.row, nearestFire.col)) obs.fire_dir = 'ADJ';
+                    else {
+                        const dr = nearestFire.row - this.row; const dc = nearestFire.col - this.col;
+                        if (Math.abs(dr) > Math.abs(dc) * 2) obs.fire_dir = dr > 0 ? 'S' : 'N';
+                        else if (Math.abs(dc) > Math.abs(dr) * 2) obs.fire_dir = dc > 0 ? 'E' : 'W';
+                        else if (dr > 0 && dc > 0) obs.fire_dir = 'SE'; else if (dr > 0 && dc < 0) obs.fire_dir = 'SW';
+                        else if (dr < 0 && dc > 0) obs.fire_dir = 'NE'; else if (dr < 0 && dc < 0) obs.fire_dir = 'NW';
+                        else if (dr > 0) obs.fire_dir = 'S'; else if (dr < 0) obs.fire_dir = 'N';
+                        else if (dc > 0) obs.fire_dir = 'E'; else if (dc < 0) obs.fire_dir = 'W';
+                        else obs.fire_dir = 'HERE'; // Should be ADJ if on fire
+                    }
+
+                } else obs.fire_dir = 'NONE';
+                // 2. Water Level
+                if (this.maxWater > 0) obs.water = this.water < this.maxWater * 0.25 ? 'LOW' : 'OK';
+                else obs.water = 'NA';
+              // 3. HP Level
+                if (this.hp < this.maxHP * 0.33) obs.hp = 'CRIT';
+                else if (this.hp < this.maxHP * 0.66) obs.hp = 'LOW';
+                else obs.hp = 'OK';
+                // 4. Current Tile Hazard
+                if (tile.isOnFire) obs.hazard = 'ON_FIRE';
+                else if (environment.hasAdjacentFire(this.row, this.col)) obs.hazard = 'FIRE_ADJ';
+                else if (tile.smokeLevel === 'Heavy') obs.hazard = 'SMOKE_H';
+                else if (tile.smokeLevel === 'Light') obs.hazard = 'SMOKE_L';
+                else obs.hazard = 'NONE';            
+                let stateKey = `T:${this.type}_FDIR:${obs.fire_dir}_W:${obs.water}_HP:${obs.hp}_HAZ:${obs.hazard}`;
+
+                if (this.type === 'rescuer') {
+                    const nearestVictim = environment.findNearestVictim(this, true); // true = only non-led, alive victims
+                    if (nearestVictim) {
+                        if (environment.isAdjacent(this.row, this.col, nearestVictim.row, nearestVictim.col)) obs.victim_dir = 'ADJ';
+                        else {
+                            const dr = nearestVictim.row - this.row; const dc = nearestVictim.col - this.col;
+                            if (Math.abs(dr) > Math.abs(dc) * 2) obs.victim_dir = dr > 0 ? 'S' : 'N';
+                            else if (Math.abs(dc) > Math.abs(dr) * 2) obs.victim_dir = dc > 0 ? 'E' : 'W';
+                            else if (dr > 0 && dc > 0) obs.victim_dir = 'SE'; else if (dr > 0 && dc < 0) obs.victim_dir = 'SW';
+                            else if (dr < 0 && dc > 0) obs.victim_dir = 'NE'; else if (dr < 0 && dc < 0) obs.victim_dir = 'NW';
+                            else if (dr > 0) obs.victim_dir = 'S'; else if (dr < 0) obs.victim_dir = 'N';
+                            else if (dc > 0) obs.victim_dir = 'E'; else if (dc < 0) obs.victim_dir = 'W';
+                            else obs.victim_dir = 'HERE';
+                        }
+                    } else obs.victim_dir = 'NONE';
+                    obs.leading = this.leadingVictim ? 'YES' : 'NO';
+                    stateKey += `_VDIR:${obs.victim_dir}_LEAD:${obs.leading}`;
+                     // Add exit direction if leading victim
+                    if (obs.leading === 'YES') {
+                        const entrance = environment.getEntranceCoordinates();
+                        if (entrance) {
+                            const dr = entrance.row - this.row; const dc = entrance.col - this.col;
+                            if (dr === 0 && dc === 0) obs.exit_dir = 'HERE';
+                            else if (Math.abs(dr) > Math.abs(dc) * 2) obs.exit_dir = dr > 0 ? 'S' : 'N';
+                            else if (Math.abs(dc) > Math.abs(dr) * 2) obs.exit_dir = dc > 0 ? 'E' : 'W';
+                            else if (dr > 0 && dc > 0) obs.exit_dir = 'SE'; else if (dr > 0 && dc < 0) obs.exit_dir = 'SW';
+                            else if (dr < 0 && dc > 0) obs.exit_dir = 'NE'; else if (dr < 0 && dc < 0) obs.exit_dir = 'NW';
+                            else if (dr > 0) obs.exit_dir = 'S'; else if (dr < 0) obs.exit_dir = 'N';
+                            else if (dc > 0) obs.exit_dir = 'E'; else if (dc < 0) obs.exit_dir = 'W';
+                            else obs.exit_dir = 'UNKNOWN'; // Should not happen if entrance exists
+                        } else obs.exit_dir = 'NO_EXIT';
+                         stateKey += `_EXDIR:${obs.exit_dir}`;
+                    }
                 }
-                if (environment.getTile(this.row, this.col).smokeLevel === 'Heavy') {
-                    this.panic = Math.min(100, this.panic + 5);
+                return stateKey;
+
+            } 
+
+            getPossibleRIActions(environment) {
+                const actions = ['MOVE_N', 'MOVE_S', 'MOVE_E', 'MOVE_W', 'IDLE'];
+                const currentTile = environment.getTile(this.row, this.col);
+
+                if (this.type === 'firefighter' || (this.type === 'rescuer' && this.water > 0)) {
+                    if (environment.hasAdjacentFire(this.row, this.col) && this.water >= 5) {
+                        actions.push('EXTINGUISH');
+                    }
+                    const directions = [[0,0],[-1,0], [1,0], [0,-1], [0,1]]; // check current and adjacent for toilet
+                    for (let [dr, dc] of directions) {
+                        const adjTile = environment.getTile(this.row + dr, this.col + dc);
+                        if (adjTile && adjTile.type === 'toilet' && this.water < this.maxWater) {
+                            actions.push('REFILL_WATER');
+                            break;
+                        }
+                    }
                 }
-                if (this.hp < 25) {
-                    this.panic = Math.min(100, this.panic + 7);
+                if (this.type === 'rescuer') {
+                    if (!this.leadingVictim) {
+                        const adjVictim = environment.findAdjacentVictim(this);
+                        if (adjVictim) actions.push('LEAD_VICTIM');
+                    } else {
+                        if (currentTile.type === 'entrance') {
+                            actions.push('DROP_VICTIM');
+                        }
+                    }
+                }         
+                   return actions.filter(action => {
+                    if (action.startsWith('MOVE_')) {
+                        let dr = 0, dc = 0;
+                        if (action === 'MOVE_N') dr = -1; else if (action === 'MOVE_S') dr = 1;
+                        else if (action === 'MOVE_W') dc = -1; else if (action === 'MOVE_E') dc = 1;
+                        const newRow = this.row + dr;
+                        const newCol = this.col + dc;
+                        return environment.isValidPosition(newRow, newCol) && !environment.getAgentAt(newRow, newCol, [this]); // Allow moving into own spot if logic supports it
+                    }
+                    // For other actions, validity is often context-dependent and checked during execution/reward.
+                    // E.g., EXTINGUISH is only truly valid if there's a fire, but it might be a possible choice.
+                    return true; 
+                });
+            }  
+            chooseRLAction(state, environment) {
+                if (!this.isRLControlled) return null;
+                this.lastState = state;
+
+                const possibleActions = this.getPossibleRIActions(environment);
+                if (possibleActions.length === 0) {
+                    this.lastAction = 'IDLE';
+                    return 'IDLE';
+                }
+
+                if (!this.qTable[state]) this.qTable[state] = {}; // Ensure state entry exists
+
+               // Initialize Q-values for new actions in this state
+                for (const action of possibleActions) {
+                    if (this.qTable[state][action] === undefined) {
+                        this.qTable[state][action] = 0; // Initialize with 0 or small random value
+                    }
                 }
                 
-                // Victim being led by rescuer reduces panic
-                if (this.type === 'victim' && this.leadingVictim) {
-                    this.panic = Math.max(25, this.panic - 5);
+                if (Math.random() < this.epsilon) {
+                    this.lastAction = possibleActions[Math.floor(Math.random() * possibleActions.length)];
+                } else {
+                    let bestAction = possibleActions[0]; // Default to first possible action
+                    let maxQ = this.qTable[state][bestAction];
+                    for (let i = 1; i < possibleActions.length; i++) {
+                        const action = possibleActions[i];
+                        if (this.qTable[state][action] > maxQ) {
+                            maxQ = this.qTable[state][action];
+                            bestAction = action;
+                        }
+                    }
+                    this.lastAction = bestAction;
                 }
+                
+                this.epsilon = Math.max(this.minEpsilon, this.epsilon * this.epsilonDecay);
+                return this.lastAction;
+            } 
+            updateQValue(reward, nextState, environment) {
+                if (!this.isRLControlled || !this.lastState || !this.lastAction) return;
+                const state = this.lastState;
+                const action = this.lastAction;
+
+                if (!this.qTable[state]) this.qTable[state] = {};
+                if (this.qTable[state][action] === undefined) this.qTable[state][action] = 0;
+
+                let maxNextQ = 0;
+                const nextPossibleActions = this.getPossibleRIActions(environment); // Actions from next state
+
+                if (this.qTable[nextState] && nextPossibleActions.length > 0) {
+                    // Initialize Q-values for new actions in nextState
+                    for (const nextAct of nextPossibleActions) {
+                        if (this.qTable[nextState][nextAct] === undefined) {
+                             this.qTable[nextState][nextAct] = 0;
+                        }
+                    }
+                    // Find maxQ among possible actions from nextState
+                    maxNextQ = -Infinity; // Start with negative infinity
+                     for (const nextAct of nextPossibleActions) {
+                        if (this.qTable[nextState][nextAct] > maxNextQ) {
+                            maxNextQ = this.qTable[nextState][nextAct];
+                        }
+                    }
+                     if (maxNextQ === -Infinity) maxNextQ = 0; // If all next Q-values were uninitialized or no possible actions
+
+                } else if (!this.qTable[nextState]) {
+                    this.qTable[nextState] = {}; // Ensure nextState entry exists
+                }
+                
+                const currentQ = this.qTable[state][action];
+                this.qTable[state][action] = currentQ + this.learningRate * (reward + this.discountFactor * maxNextQ - currentQ);
+
+                this.lastState = null;
+                this.lastAction = null;
             }
-        }
+
+       }          
+        
 
         class Environment {
-            constructor(width = 20, height = 15) {
+        constructor(width = 20, height = 15) {
                 this.width = width;
                 this.height = height;
                 this.grid = [];
                 this.agents = [];
+                this.activeFires = new Set(); // Cache untuk performa
                 this.initializeGrid();
                 this.spawnAgents();
                 this.startFires();
@@ -777,44 +987,314 @@
                     agent.updatePanic(this);
                 }
             }
+            
+            getEntranceCoordinates() {
+                for (let r = 0; r < this.height; r++) {
+                    for (let c = 0; c < this.width; c++) {
+                        if (this.grid[r][c].type === 'entrance') {
+                            return { row: r, col: c };
+                        }
+                    }
+                }
+                return null; // Should be defined
+            }
+
 
             performAgentActions() {
+                const preActionData = new Map();
+                this.agents.forEach(agent => {
+                    preActionData.set(agent, {
+                        hp: agent.hp,
+                        sp: agent.sp,
+                        water: agent.water,
+                        row: agent.row,
+                        col: agent.col,
+                        isLeading: agent.leadingVictim !== null,
+                        panic: agent.panic,
+                        rescuedVictimsCount: this.getStats().victimsRescued, // Snapshot for reward
+                        activeFiresCount: this.getStats().firesActive, // Snapshot for reward
+                        tileOnFire: this.getTile(agent.row, agent.col).isOnFire,
+                        tileSmoke: this.getTile(agent.row, agent.col).smokeLevel,
+                    });
+                });
+
                 for (let agent of this.agents) {
                     if (agent.dead || agent.unconscious) {
-                        agent.recoverStamina(0);
+                        agent.recoverStamina(0); // No recovery if dead/unconscious by default
                         continue;
                     }
-                    
-                    // Simple AI behavior
-                    this.performAI(agent);
-                    
-                    // Recover stamina if no action taken
-                    agent.recoverStamina(3);
+
+                    if (agent.isRLControlled) {
+                        const state = agent.getRLState(this);
+                        const action = agent.chooseRLAction(state, this); // Stores lastState and lastAction in agent
+                        this.executeRLAction(agent, action, preActionData.get(agent)); // Pass prev state for context
+                    } else {
+                        // Original AI for victims or non-RL agents
+                        this.performAI(agent); // This calls the old AI logic
+                    }
+                }
+
+                // After all agents have acted, calculate rewards and update Q-tables for RL agents
+                for (let agent of this.agents) {
+                    if (agent.isRLControlled && agent.lastState && agent.lastAction) { // agent.dead check is implicit in reward
+                        const reward = this.calculateReward(agent, agent.lastAction, preActionData.get(agent));
+                        const nextState = agent.getRLState(this); // Get state *after* action and env changes
+                        agent.updateQValue(reward, nextState, this);
+                    }
+                     // Non-RL agents (or all agents) recover some baseline stamina if they didn't perform a costly action
+                    if (!agent.dead && !agent.unconscious && !(agent.isRLControlled && agent.lastAction && agent.lastAction.startsWith("MOVE_"))) {
+                         // Let specific actions (like IDLE) handle their own stamina recovery.
+                         // Generic small recovery if no major action was taken.
+                         if (!(agent.isRLControlled && agent.lastAction === 'IDLE')) { // IDLE handles its own
+                            agent.recoverStamina(1); // Small passive recovery
+                         }
+                    }
+                }
+            }
+            executeRLAction(agent, action, prevStateData) {
+                let dr = 0, dc = 0;
+                let actionSucceeded = false; // To track if the intended action had an effect
+                const initialSP = agent.sp;
+
+                switch(action) {
+                    case 'MOVE_N': dr = -1; break;
+                    case 'MOVE_S': dr = 1; break;
+                    case 'MOVE_W': dc = -1; break;
+                    case 'MOVE_E': dc = 1; break;
+                    case 'EXTINGUISH':
+                        if ((agent.type === 'firefighter' || agent.type === 'rescuer') && agent.water >= 5) {
+                            // Find best adjacent fire to extinguish
+                            let extinguishedSomething = false;
+                            const directions = [[-1,0], [1,0], [0,-1], [0,1]];
+                            for(let [r_off, c_off] of directions) {
+                                const fireTile = this.getTile(agent.row + r_off, agent.col + c_off);
+                                if (fireTile && fireTile.isOnFire) {
+                                    agent.water -= 5;
+                                    fireTile.fireFuel = Math.max(0, fireTile.fireFuel - 15); // More effective
+                                    fireTile.dampness = Math.min(10, fireTile.dampness + 5);
+                                    this.logEvent(`${agent.type} RL: Extinguished fire at (${agent.row + r_off}, ${agent.col + c_off})`, 'info');
+                                    extinguishedSomething = true;
+                                    actionSucceeded = true; 
+                                    // Break if we only want to extinguish one patch per action, or continue for multiple
+                                    break; 
+                                }
+                            }
+                        }
+                        agent.sp = Math.max(0, agent.sp - 3); // Cost of extinguishing
+                        break;
+                    case 'REFILL_WATER':
+                        if ((agent.type === 'firefighter' || agent.type === 'rescuer') && agent.water < agent.maxWater) {
+                            const currentTile = this.getTile(agent.row, agent.col);
+                            const directions = [[0,0],[-1,0], [1,0], [0,-1], [0,1]]; // Check current and adjacent
+                             for (let [r_off, c_off] of directions) {
+                                const tileToCheck = this.getTile(agent.row + r_off, agent.col + c_off);
+                                if (tileToCheck && tileToCheck.type === 'toilet') {
+                                    agent.water = Math.min(agent.maxWater, agent.water + 40);
+                                    this.logEvent(`${agent.type} RL: Refilled water.`, 'info');
+                                    actionSucceeded = true;
+                                    break;
+                                }
+                            }
+                        }
+                        agent.sp = Math.max(0, agent.sp - 1); // Small cost
+                        break;
+                    case 'LEAD_VICTIM':
+                        if (agent.type === 'rescuer' && !agent.leadingVictim) {
+                            const victimToLead = this.findAdjacentVictim(agent);
+                            if (victimToLead) {
+                                agent.leadingVictim = victimToLead;
+                                victimToLead.leadingVictim = agent; // Victim is now being led
+                                this.logEvent(`Rescuer RL: Started leading ${victimToLead.type} at (${victimToLead.row}, ${victimToLead.col})`, 'info');
+                                actionSucceeded = true;
+                            }
+                        }
+                        agent.sp = Math.max(0, agent.sp - 2);
+                        break;
+                    case 'DROP_VICTIM':
+                        if (agent.type === 'rescuer' && agent.leadingVictim) {
+                            const currentTile = this.getTile(agent.row, agent.col);
+                            if (currentTile.type === 'entrance') {
+                                agent.leadingVictim.rescued = true;
+                                // Move victim to rescuer's spot for visual confirmation
+                                agent.leadingVictim.row = agent.row;
+                                agent.leadingVictim.col = agent.col;
+                                agent.leadingVictim.leadingVictim = null; // Victim no longer led
+                                this.logEvent(`Victim rescued by Rescuer RL at entrance!`, 'success');
+                                agent.leadingVictim = null; // Rescuer no longer leading
+                                actionSucceeded = true;
+                            }
+                        }
+                        agent.sp = Math.max(0, agent.sp - 1);
+                        break;
+                    case 'IDLE':
+                        agent.recoverStamina(5); // Good stamina recovery for idling
+                        actionSucceeded = true; // Idling is always successful
+                        break;
+                }
+
+                if (action.startsWith('MOVE_')) {
+                    const newRow = agent.row + dr;
+                    const newCol = agent.col + dc;
+                    // Check if the target tile is valid and not occupied by another agent (excluding the one being led, if any)
+                    const agentAtTarget = this.getAgentAt(newRow, newCol, agent.leadingVictim ? [agent, agent.leadingVictim] : [agent]);
+
+                    if (this.isValidPosition(newRow, newCol) && !agentAtTarget) {
+                        const oldRow = agent.row;
+                        const oldCol = agent.col;
+                        agent.row = newRow;
+                        agent.col = newCol;
+                        actionSucceeded = true;
+                        
+                        if (agent.type === 'rescuer' && agent.leadingVictim) {
+                            // Move victim to agent's previous spot if valid and not occupied by the agent itself now
+                            const victimTargetAgent = this.getAgentAt(oldRow, oldCol, [agent.leadingVictim]);
+                            if (this.isValidPosition(oldRow, oldCol) && !victimTargetAgent) {
+                                agent.leadingVictim.row = oldRow;
+                                agent.leadingVictim.col = oldCol;
+                            } else { // Fallback: try to find any adjacent empty spot for victim
+                                const victimMoveDirs = [[-1,0], [1,0], [0,-1], [0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+                                let spotFound = false;
+                                for(let [vdr, vdc] of victimMoveDirs) {
+                                    const vr = agent.row + vdr; // relative to new agent pos
+                                    const vc = agent.col + vdc;
+                                    if (this.isValidPosition(vr, vc) && !this.getAgentAt(vr, vc, [agent, agent.leadingVictim]) && !(vr === agent.row && vc === agent.col)) {
+                                        agent.leadingVictim.row = vr;
+                                        agent.leadingVictim.col = vc;
+                                        spotFound = true;
+                                        break;
+                                    }
+                                }
+                                if(!spotFound) { // If no spot, victim might get stuck or overwrite logic might be needed
+                                     // For now, they might stay if no space, or you could make the rescuer's move fail.
+                                }
+                            }
+                        }
+                        agent.sp = Math.max(0, agent.sp - (this.getTile(newRow, newCol).passability * 1.5)); // Cost based on tile passability
+                    } else {
+                         agent.sp = Math.max(0, agent.sp - 1); // Penalty for failed move attempt
+                    }
+                }
+                // If an action other than IDLE did not succeed as intended (e.g. extinguish with no fire)
+                if (!actionSucceeded && action !== 'IDLE') {
+                    agent.recoverStamina(1); // Small recovery for a "wasted" non-move, non-idle action
                 }
             }
 
-            performAI(agent) {
-                // Check panic - might cause random/freeze behavior
-                const panicProb = agent.getPanicProbability();
-                if (Math.random() < panicProb) {
-                    if (Math.random() < Math.max(0, panicProb - 0.15)) {
-                        // Freeze - do nothing
-                        return;
-                    } else {
-                        // Random movement
-                        this.moveAgentRandomly(agent);
-                        return;
+            calculateReward(agent, action, prevData) {
+                let reward = -0.5; // Base cost of living / taking a turn
+                const currentHp = agent.hp;
+                const currentTile = this.getTile(agent.row, agent.col);
+                const missionStats = this.getStats(); // Current stats
+
+                // --- Generic Penalties/Rewards ---
+                if (currentHp < prevData.hp) { // Took damage
+                    reward -= (prevData.hp - currentHp) * 2.5; 
+                }
+                if (agent.dead) {
+                    reward -= 250;
+                    return reward; // Terminal state, large penalty
+                }
+                if (agent.unconscious && prevData.hp > 0) { // Became unconscious this turn
+                    reward -= 70;
+                }
+                 if (agent.panic > prevData.panic && agent.panic > agent.panicK) { // Panic increased significantly
+                    reward -= (agent.panic - prevData.panic) * 0.2;
+                } else if (agent.panic < prevData.panic) { // Panic decreased
+                    reward += (prevData.panic - agent.panic) * 0.1;
+                }
+
+
+                // --- Hazard Penalties (applied if agent IS on the tile) ---
+                if (currentTile.isOnFire) reward -= 25;
+                else if (this.hasAdjacentFire(agent.row, agent.col) && !prevData.tileOnFire) reward -= 10; // Moved next to fire
+                else if (currentTile.smokeLevel === 'Heavy' && (agent.scba <= 0 || agent.type === 'victim')) reward -= 8;
+                else if (currentTile.smokeLevel === 'Light' && (agent.scba <= 0 || agent.type === 'victim')) reward -= 3;
+
+                // --- Action-Specific Rewards ---
+                if (agent.type === 'firefighter') {
+                    if (action === 'EXTINGUISH') {
+                        if (missionStats.firesActive < prevData.activeFiresCount) { // Successfully reduced total fires
+                            reward += (prevData.activeFiresCount - missionStats.firesActive) * 40;
+                        } else if (prevData.tileOnFire || this.hasAdjacentFire(prevData.row, prevData.col)) { // Attempted extinguish on/near fire but no global change
+                            reward += 5; // Small reward for trying correctly
+                        } else {
+                            reward -= 8; // Wasted extinguish action
+                        }
+                    }
+                    if (action === 'REFILL_WATER') {
+                        if (agent.water > prevData.water) reward += 25;
+                        else if (agent.water === agent.maxWater) reward -= 2; // Tried to refill when full
+                        else reward -= 5; // Failed refill
+                    }
+                    if (missionStats.firesActive === 0 && prevData.activeFiresCount > 0) {
+                        reward += 300; // Bonus for putting out ALL fires
+                    }
+                     // Penalty for low water near fire
+                    if (agent.water < agent.maxWater * 0.2 && (currentTile.isOnFire || this.hasAdjacentFire(agent.row, agent.col))) {
+                        reward -= 15;
                     }
                 }
-                
-                if (agent.type === 'firefighter') {
-                    this.firefighterAI(agent);
-                } else if (agent.type === 'rescuer') {
-                    this.rescuerAI(agent);
-                } else if (agent.type === 'victim') {
-                    this.victimAI(agent);
+
+                if (agent.type === 'rescuer') {
+                    if (action === 'LEAD_VICTIM' && agent.leadingVictim && !prevData.isLeading) {
+                        reward += 50; // Started leading
+                    }
+                    if (action === 'DROP_VICTIM' && missionStats.victimsRescued > prevData.rescuedVictimsCount) {
+                        reward += 200; // Successfully rescued a victim
+                        if (missionStats.victimsRemaining === 0 && this.agents.filter(a => a.type === 'victim' && !a.rescued && !a.dead).length === 0) {
+                             reward += 250; // Bonus for ALL victims rescued
+                        }
+                    }
+                    if (agent.leadingVictim) {
+                        const entrance = this.getEntranceCoordinates();
+                        if (entrance) {
+                            const distToExit = Math.abs(agent.row - entrance.row) + Math.abs(agent.col - entrance.col);
+                            const prevDistToExit = Math.abs(prevData.row - entrance.row) + Math.abs(prevData.col - entrance.col);
+                            if (distToExit < prevDistToExit) reward += 15; // Moved closer to exit
+                            else if (distToExit > prevDistToExit) reward -= 8; // Moved away from exit
+                        }
+                        if (agent.leadingVictim.hp < /* need victim's prev HP */ agent.leadingVictim.maxHP * 0.9 && agent.leadingVictim.hp < prevData.hp /* approx */) {
+                           // reward -= 10; // Victim took damage while being led
+                        }
+
+                    } else if (action === 'MOVE_N' || action === 'MOVE_S' || action === 'MOVE_E' || action === 'MOVE_W') {
+                        // Reward for moving towards a victim if not leading one
+                        const nearestVictim = this.findNearestVictim(agent, true);
+                        if (nearestVictim) {
+                            const distToVictim = Math.abs(agent.row - nearestVictim.row) + Math.abs(agent.col - nearestVictim.col);
+                            const prevDistToVictim = Math.abs(prevData.row - nearestVictim.row) + Math.abs(prevData.col - nearestVictim.col);
+                            if (distToVictim < prevDistToVictim) reward += 10;
+                        }
+                    }
+                     if (action === 'EXTINGUISH' && agent.water > 0) { // Rescuer helping with fire
+                        if (missionStats.firesActive < prevData.activeFiresCount) reward += 15; else reward += 2;
+                    }
+                     if (action === 'REFILL_WATER' && agent.water > prevData.water) reward += 10;
                 }
+                 // Movement cost / reward for reaching safer tiles
+                if (action.startsWith("MOVE_")) {
+                    if (!currentTile.isOnFire && !this.hasAdjacentFire(agent.row, agent.col) && currentTile.smokeLevel === 'None' &&
+                        (prevData.tileOnFire || this.hasAdjacentFire(prevData.row, prevData.col) || prevData.tileSmoke !== 'None')) {
+                        reward += 5; // Moved to a significantly safer tile
+                    }
+                }
+                return reward;
             }
+            performAI(agent) { // This is the OLD AI, only for victims now or as fallback
+                if (agent.isRLControlled) return; // RL agents use their own logic loop
+                const panicProb = agent.getPanicProbability();
+                if (Math.random() < panicProb && agent.type==='victim') { // Panic mainly for victims in old AI
+                    if (Math.random() < Math.max(0, panicProb - 0.15)) {
+                        agent.recoverStamina(1); return; // Freeze
+                    } else {
+                        this.moveAgentRandomly(agent); return;
+                    }
+                }
+              
+                if (agent.type === 'firefighter') this.firefighterAI(agent); // Kept if you want to switch off RL
+                else if (agent.type === 'rescuer') this.rescuerAI(agent); // Kept if you want to switch off RL
+                else if (agent.type === 'victim') this.victimAI(agent);
+            }                 
 
             firefighterAI(agent) {
                 // Priority: Fight fires, refill water if low
@@ -882,7 +1362,7 @@
                     }
                 } else {
                     // Find nearest victim to rescue
-                    const victim = this.findNearestVictim(agent);
+                    findNearestVictim(agent, onlyNonLedAndAlive = false);
                     if (victim) {
                         if (this.isAdjacent(agent.row, agent.col, victim.row, victim.col)) {
                             // Start leading victim
@@ -929,6 +1409,40 @@
                     }
                 }
             }
+            findAdjacentVictim(agent) { // Helper for Rescuer RL
+                const directions = [[-1,0], [1,0], [0,-1], [0,1]];
+                for (let [dr, dc] of directions) {
+                    const nr = agent.row + dr;
+                    const nc = agent.col + dc;
+                    const otherAgent = this.getAgentAt(nr, nc);
+                    if (otherAgent && otherAgent.type === 'victim' && !otherAgent.dead && !otherAgent.rescued && !otherAgent.leadingVictim) {
+                        return otherAgent;
+                    }
+                }
+                return null;
+            }
+            findNearestVictim(agent, onlyNonLedAndAlive = false) { // Modified to support filter
+                let nearest = null;
+                let minDistance = Infinity;
+                
+                for (let victim of this.agents) {
+                    if (victim.type === 'victim' && victim !== agent ) { // Don't target self
+                        if (onlyNonLedAndAlive) {
+                            if (victim.rescued || victim.dead || victim.leadingVictim) continue;
+                        } else {
+                            if (victim.rescued || victim.dead) continue;
+                        }  
+                        const distance = Math.abs(victim.row - agent.row) + Math.abs(victim.col - agent.col);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            nearest = victim;
+                        }
+                    }
+                }
+                return nearest;
+            }
+            
+            
 
             moveAgentRandomly(agent) {
                 const directions = [[-1,0], [1,0], [0,-1], [0,1]];
@@ -1082,9 +1596,15 @@
                 return Math.abs(row1 - row2) + Math.abs(col1 - col2) === 1;
             }
 
-            getAgentAt(row, col) {
-                return this.agents.find(agent => agent.row === row && agent.col === col && !agent.dead);
+            getAgentAt(row, col, excludeAgents = []) {
+                return this.agents.find(agent => 
+                    agent.row === row && 
+                    agent.col === col && 
+                    !agent.dead && 
+                    !excludeAgents.includes(agent)
+                );
             }
+
 
             logEvent(message, type = 'info') {
                 const log = document.getElementById('activityLog');
